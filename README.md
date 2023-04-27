@@ -68,3 +68,21 @@ sciCTextract \
     Undetermined_S0_I1_001.fastq.gz \
     Undetermined_S0_I2_001.fastq.gz
 ```
+
+Note that our current typical use is to run on the Illumina NextSeq 2000.
+Default settings should work for NextSeq 1000/2000, NovaSeq 6000 (v1.5 or more
+recent). For instruments that use forward-strand workflows
+(MiSeq, HiSeq, MiniSeq Rapid, etc.) we provide the `--forward-mode` option
+to override the default reverse-complementing of the i5 barcode reads.
+
+Output
+------
+
+Output consists of one pair of gzip compressed Fastq files per sample.
+The read headers are re-written to include the error-corrected barcode
+sequences and to be compact while retaining enough information to
+unambihguously identify each source read. For example:
+
+```
+@HMH53BCX3:1:1105:11433:2512\_GCGTTAAA\_GTGTATCG\_AGCGATAG\_CAGGACGT 1:N:0:0
+```
