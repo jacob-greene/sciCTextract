@@ -208,9 +208,6 @@ def read_primer_barcodes(filename):
             i7_seq = row["i7_index_seq"]
             i5_name = row["i5_index_id"]
             i5_seq = row["i5_index_seq"]
-            assert i7_name.startswith("P7_") and i5_name.startswith("P5_"), i7_name
-            i7_name = "Ad2." + i7_name[3:] 
-            i5_name = "Ad1." + i5_name[3:] 
             suffixes.append(Suffix(suffix, i7_name, i7_seq, i5_name, i5_seq))
     return suffixes
 
