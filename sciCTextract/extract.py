@@ -9,6 +9,8 @@ from Bio.SeqIO.QualityIO import FastqGeneralIterator
 from collections import defaultdict, namedtuple
 
 """
+Simple demultiplexing for sciCUT&Tag runs. Assumes Illumina sequencers,
+the process has been tested on HiSeq 2500 and NextSeq 2000 output.
 """
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
@@ -20,13 +22,27 @@ UNDETERMINED = "Undetermined"
 Prefix = namedtuple("Prefix", "tag j7_name j7_seq j5_name j5_seq")
 Suffix = namedtuple("Suffix", "tag i7_name i7_seq i5_name i5_seq")
 
-def _emit_fastq(outfile, hdr, i7, i5, j7, j5, seq, qual):
+def revcomp(seq, t=str.maketrans('ACGTacgt', 'TGCAtgca')):
+    """Reverse-complement of a constrained sequence string. Marginally faster
+    than Bio.Seq but not general purpose (no IUPAC, works on strings)"""
+    return seq.translate(t)[::-1]
+
+def fastq_reader(filename):
+    """Wrap Biopython streaming fastq reader. Assumes gzip'ed input"""
+    with gzip.open(filename, "rt") as infile:
+        for (hdr, seq, qual) in FastqGeneralIterator(infile):
+            yield(hdr, seq, qual)
+
+def emit_fastq(outfile, hdr, i7, i5, j7, j5, seq, qual):
     acc, flag = hdr.split(" ")
     _, _, flowcell, lane, tile, x, y = acc.split(":")
-    print(f"@{flowcell}:{lane}:{tile}:{x}:{y}_{i7}_{i5}_{j7}_{j5} {flag}", seq, "+", qual, sep="\n", file=outfile)
+    print(f"@{flowcell}:{lane}:{tile}:{x}:{y}_{i7}_{i5}_{j7}_{j5} {flag}",
+          seq, "+", qual, sep="\n", file=outfile)
 
 class SampleBarcodes:
-
+    """Track individual barcodes with optional, but highly recommended,
+    single subsitiution error tolerance. Includes utilities to write 
+    process reads and write to sample-specific files."""
     # barcode lookup tables optionally supporting one mismatch
     def __init__(self, exact_mode=False, forward_mode=False):
         self.exact_mode = exact_mode
@@ -39,11 +55,11 @@ class SampleBarcodes:
         self.sample_lookup = {}
         self.outfiles = {}
 
-    def enumerate_one_substitution(self, lookup):
+    def enumerate_substitutions(self, lookup):
         result = {}
         for seq in lookup:
             if self.exact_mode:
-                result[seq] = seq # Exact matching not recommended
+                result[seq] = seq # Exact matching; not recommended
                 continue
             u = set()
             for i in range(len(seq)):
@@ -76,12 +92,12 @@ class SampleBarcodes:
                 self.sample_names.add(name)
                 self.sample_lookup[key] = name
 
-        self.i7_lookup = self.enumerate_one_substitution(i7_lookup)
-        self.i5_lookup = self.enumerate_one_substitution(i5_lookup)
-        self.j7_lookup = self.enumerate_one_substitution(j7_lookup)
-        self.j5_lookup = self.enumerate_one_substitution(j5_lookup)
+        self.i7_lookup = self.enumerate_substitutions(i7_lookup)
+        self.i5_lookup = self.enumerate_substitutions(i5_lookup)
+        self.j7_lookup = self.enumerate_substitutions(j7_lookup)
+        self.j5_lookup = self.enumerate_substitutions(j5_lookup)
 
-    def _open_outfiles(self, outdir):
+    def open_outfiles(self, outdir):
         assert os.path.exists(outdir), f"ERROR: Output direcory {outdir} does not exist"
         for sample in self.sample_names:
             self.outfiles[sample] = (
@@ -95,7 +111,7 @@ class SampleBarcodes:
 
     def process_fastq(self, outdir, r1_filename, r2_filename, i1_filename, i2_filename):
 
-        self._open_outfiles(outdir)
+        self.open_outfiles(outdir)
 
         total, matched = 0, 0
 
@@ -148,8 +164,8 @@ class SampleBarcodes:
             else:
                 sample = UNDETERMINED
             o1, o2 = self.outfiles[sample]
-            _emit_fastq(o1, h1, i7, i5, j7, j5, s1, q1)
-            _emit_fastq(o2, h2, i7, i5, j7, j5, s2, q2)
+            emit_fastq(o1, h1, i7, i5, j7, j5, s1, q1)
+            emit_fastq(o2, h2, i7, i5, j7, j5, s2, q2)
 
             if total % 100000 == 0:
                 logging.info(f"Matched {matched} reads of {total}")
@@ -160,17 +176,6 @@ class SampleBarcodes:
             o2.close()
 
         logging.info(f"Matched {matched} reads of {total}")
-
-def fastq_reader(filename):
-    with gzip.open(filename, "rt") as infile:
-        for (hdr, seq, qual) in FastqGeneralIterator(infile):
-            yield(hdr, seq, qual)
-
-def revcomp(seq, t=str.maketrans('ACGTacgt', 'TGCAtgca')):
-    """Marginally faster than Bio.Seq but not general (no IUPAC, works on strings)"""
-    return seq.translate(t)[::-1]
-
-# --------------------------------------------------------------------------------
 
 def read_tn5_barcodes(filename):
     prefixes = []
@@ -211,19 +216,39 @@ def read_primer_barcodes(filename):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-                    prog='extract',
-                    description='extract')
+                    prog='sciCTextract',
+                    description='Simple sciCUT&Tag demultiplexer')
 
-    parser.add_argument('--Tn5_Barcode', type=str, required=True)
-    parser.add_argument('--Primer_Barcode', type=str, required=True)
-    parser.add_argument('--outdir', type=str, required=True)
-    parser.add_argument('--forward-mode', action='store_true')
-    parser.add_argument('--exact-mode', action='store_true')
-    parser.add_argument('r1_filename', type=str)
-    parser.add_argument('r2_filename', type=str)
-    parser.add_argument('i1_filename', type=str)
-    parser.add_argument('i2_filename', type=str)
-
+    parser.add_argument('--Tn5_Barcode',
+                        type=str,
+                        required=True,
+                        help='CSV format table of Tn5 barcodes and sample name prefixes')
+    parser.add_argument('--Primer_Barcode',
+                        type=str,
+                        required=True,
+                        help='CSV format table of Primer barcodes and sample name suffixes')
+    parser.add_argument('--outdir',
+                        type=str,
+                        required=True,
+                        help='Name of pre-existing output directory for Fastq files')
+    parser.add_argument('--exact-mode',
+                        action='store_true',
+                        help='Require exact matching of barcode sequences rather than default one-mismatch tolerance. Not generally recommended')
+    parser.add_argument('--forward-mode',
+                        action='store_true',
+                        help='Use forward-strand (Workflow A) processing for MiSeq, HiSeq, etc.')
+    parser.add_argument('r1_filename',
+                        type=str,
+                        help='First read filename')
+    parser.add_argument('r2_filename',
+                        type=str,
+                        help='Second read filename')
+    parser.add_argument('i1_filename',
+                        type=str,
+                        help='First index read filename (i7)')
+    parser.add_argument('i2_filename',
+                        type=str,
+                        help='Second index read filename (i5)')
     args = parser.parse_args()
     return args
 
