@@ -84,5 +84,5 @@ sequences and to be compact while retaining enough information to
 unambihguously identify each source read. For example:
 
 ```
-@HMH53BCX3:1:1105:11433:2512\_GCGTTAAA\_GTGTATCG\_AGCGATAG\_CAGGACGT 1:N:0:0
+@HMH53BCX3:1:1105:11433:2512_GCGTTAAA_GTGTATCG_AGCGATAG_CAGGACGT 1:N:0:0
 ```
