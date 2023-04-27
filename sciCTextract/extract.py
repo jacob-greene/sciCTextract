@@ -167,7 +167,7 @@ class SampleBarcodes:
             emit_fastq(o1, h1, i7, i5, j7, j5, s1, q1)
             emit_fastq(o2, h2, i7, i5, j7, j5, s2, q2)
 
-            if total % 100000 == 0:
+            if total % 1000000 == 0:
                 logging.info(f"Matched {matched} reads of {total}")
 
         for sample in self.outfiles:
