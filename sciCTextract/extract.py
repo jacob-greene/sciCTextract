@@ -113,7 +113,7 @@ class SampleBarcodes:
 
         self.open_outfiles(outdir)
 
-        total, matched = 0, 0
+        total, matched, valid = 0, 0, 0
 
         r1_reader = fastq_reader(r1_filename)
         r2_reader = fastq_reader(r2_filename)
@@ -147,7 +147,6 @@ class SampleBarcodes:
                and i5 in self.i5_lookup \
                and j7 in self.j7_lookup \
                and j5 in self.j5_lookup:
-                matched += 1
 
                 i7 = self.i7_lookup[i7]
                 i5 = self.i5_lookup[i5]
@@ -157,9 +156,15 @@ class SampleBarcodes:
                 key = (i7, i5, j7, j5)
                 if key in self.sample_lookup:
                     sample = self.sample_lookup[key]
+                    matched += 1
                 else:
                     # Should not reach this
-                    log.warn(f"Valid barcodes were not mapped to a sample {i7}_{i5}_{j7}_{j5}")
+                    valid += 1
+                    if valid <= 5:
+                        logging.warn(f"Valid barcodes were not mapped to a sample {i7}_{i5}_{j7}_{j5}")
+                        if valid == 5:
+                            logging.warn(f"Will only report first 5 occurences of this message")
+
                     sample = UNDETERMINED
             else:
                 sample = UNDETERMINED
@@ -168,14 +173,18 @@ class SampleBarcodes:
             emit_fastq(o2, h2, i7, i5, j7, j5, s2, q2)
 
             if total % 1000000 == 0:
-                logging.info(f"Matched {matched} reads of {total}")
+                logging.info(f"Matched {matched} reads of {total} {matched*100.0/total:.1f}%")
+                if valid > 0:
+                    logging.info(f"  {valid} valid barcodes in unassigned combinations")
 
         for sample in self.outfiles:
             o1, o2 = self.outfiles[sample]
             o1.close()
             o2.close()
 
-        logging.info(f"Matched {matched} reads of {total}")
+        logging.info(f"Matched {matched} reads of {total} {matched*100.0/total:.1f}%")
+        if valid > 0:
+            logging.info(f"  {valid} valid barcodes in unassigned combinations")
 
 def read_tn5_barcodes(filename):
     prefixes = []
